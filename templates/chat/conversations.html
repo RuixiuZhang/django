@@ -1,0 +1,85 @@
+{% extends "chat/base.html" %}
+{% block title %}会话 · LM Chat{% endblock %}
+{% block body %}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="dot"></div>
+      <div>
+        <div class="title">LM Chat</div>
+        <div class="sub">Ollama LLM UI</div>
+      </div>
+    </div>
+
+    <button class="btn btn-ghost" id="newBtn">新建对话</button>
+    <a class="btn btn-ghost" href="/logout/" style="display:block; margin-top:10px; text-align:center;">退出登录</a>
+
+    <div class="hint">
+      <div class="hint-title">账号</div>
+      <div class="hint-body">当前用户：<span class="mono">{{ request.user.username }}</span></div>
+    </div>
+
+    <div class="hint">
+      <div class="hint-title">提示</div>
+      <div class="hint-body">确保 Ollama 已启动并开启 Local Server。</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="header">
+      <div class="h-title">会话列表</div>
+      <div class="h-sub">点击进入聊天；可重命名/ 删除</div>
+    </div>
+
+    <div class="list" id="list">
+      {% for c in convs %}
+      <div class="conv-row">
+        <a class="conv-link" href="/c/{{ c.id }}/">
+          <div class="conv-title">{{ c.title }}</div>
+          <div class="conv-meta">{{ c.updated_at }}</div>
+        </a>
+        <div class="conv-actions">
+          <button class="mini" onclick="renameConv({{ c.id }}, '{{ c.title|escapejs }}')">改名</button>
+          <button class="mini danger" onclick="deleteConv({{ c.id }})">删除</button>
+        </div>
+      </div>
+      {% empty %}
+      <div class="empty">还没有会话，点击“新建对话”。</div>
+      {% endfor %}
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function postJSON(url, body){
+    const r = await fetch(url, {
+      method:"POST",
+      headers: {"Content-Type":"application/json", "X-CSRFToken": csrftoken || ""},
+      body: JSON.stringify(body||{})
+    });
+    return await r.json();
+  }
+
+  document.getElementById("newBtn").addEventListener("click", async () => {
+    const data = await postJSON("/api/new/", {});
+    if(data && data.ok && data.id){
+      location.href = "/c/" + data.id + "/";
+    }
+  });
+
+  async function renameConv(id, oldTitle){
+    const t = prompt("新标题：", oldTitle || "新对话");
+    if(!t) return;
+    const data = await postJSON("/api/rename/", {id, title: t});
+    if(data && data.ok) location.reload();
+  }
+
+  async function deleteConv(id){
+    if(!confirm("删除该会话及全部消息？")) return;
+    const data = await postJSON("/api/delete/", {id});
+    if(data && data.ok) location.reload();
+  }
+</script>
+{% endblock %}

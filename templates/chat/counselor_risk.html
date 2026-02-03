@@ -1,0 +1,18 @@
+{% extends "chat/base.html" %}
+{% block title %}心理风险审阅台{% endblock %}
+{% block body %}
+<div class="list">
+  {% for r in rows %}
+  <div class="conv-row">
+    <div>
+      <div class="conv-title">#{{ r.cid }} · {{ r.title }}</div>
+      <div class="conv-meta">
+        用户：{{ r.user }} · 风险：{{ r.level }} · 状态：{{ r.status }}<br/>
+        摘要：{{ r.summary|default:"（无）" }}
+      </div>
+    </div>
+    <a class="mini" href="/_counselor/c/{{ r.cid }}/">审阅</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

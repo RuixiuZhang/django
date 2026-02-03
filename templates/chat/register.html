@@ -1,0 +1,26 @@
+{% extends "chat/base.html" %}
+{% block title %}注册 · LM Chat{% endblock %}
+{% block body %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-title">创建账号</div>
+    <div class="auth-sub">账号仅保存于本地服务器数据库</div>
+    {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+    <form method="post" class="auth-form">
+      {% csrf_token %}
+      <label>用户名</label>
+      <input name="username" autocomplete="username" required />
+      <label>密码</label>
+      <input name="password" type="password" autocomplete="new-password" required />
+      <label>重复密码</label>
+      <input name="password2" type="password" autocomplete="new-password" required />
+      <button class="btn auth-btn" type="submit">注册</button>
+    </form>
+    <div class="auth-links">
+      <a href="/login/">返回登录</a>
+        <a href="/readme/" class="mono" target="_blank" style="color:#ffffff;">关于本站</a>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

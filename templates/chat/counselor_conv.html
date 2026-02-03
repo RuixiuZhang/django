@@ -1,0 +1,56 @@
+{% extends "chat/base.html" %}
+{% block title %}审阅会话{% endblock %}
+{% block body %}
+<div class="list">
+  <div class="hint">
+    <div class="hint-title">摘要</div>
+    <div class="hint-body">{{ summary }}</div>
+  </div>
+
+  <div class="hint">
+    <div class="hint-title">最近消息</div>
+    <div class="hint-body">
+      {% for m in msgs %}
+        <div><b>{{ m.role }}</b>：{{ m.content|truncatechars:150 }}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="hint">
+    <div class="hint-title">管理员备注（内部，不对用户展示）</div>
+
+    <form method="post" action="/_counselor/review/">
+      {% csrf_token %}
+      <input type="hidden" name="cid" value="{{ conv.id }}">
+
+      <textarea
+        name="note"
+        rows="5"
+        placeholder="在此填写你的判断、关注点或后续建议（仅内部使用）"
+        style="width:100%; resize:vertical;"
+      >{{ review.note }}</textarea>
+
+      <div style="margin-top:12px; display:flex; gap:10px;">
+        <button class="mini">保存备注</button>
+        <a class="mini" href="/_counselor/risk/">返回列表</a>
+      </div>
+    </form>
+</div>
+
+</div>
+<div class="hint">
+  <div class="hint-title">发送给用户（可见）</div>
+  <div class="hint-body">
+    <form method="post" action="/_counselor/send/">
+      {% csrf_token %}
+      <input type="hidden" name="cid" value="{{ conv.id }}">
+      <textarea name="text" rows="3" style="width:100%;" placeholder="这条消息用户会看到"></textarea>
+      <div style="margin-top:10px;">
+        <button class="mini">发送</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+

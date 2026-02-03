@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}LM Chat{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'app.css' %}">
+</head>
+<body>
+  {% block body %}{% endblock %}
+  <script>
+    const csrftoken = (document.cookie.match(/csrftoken=([^;]+)/)||[])[1];
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

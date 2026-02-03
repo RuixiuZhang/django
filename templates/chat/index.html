@@ -1,0 +1,475 @@
+{% extends "chat/base.html" %}
+{% block title %}LM Chat 内测版 0.3.1{% endblock %}
+{% block body %}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="dot"></div>
+      <div>
+        <div class="title">LM Chat</div>
+        <div class="sub">Ollama Local mode</div>
+      </div>
+    </div>
+
+    <button class="btn btn-ghost" id="newBtn">新建对话</button>
+    <a class="btn btn-ghost" href="/conversations/" style="display:block; margin-top:10px; text-align:center;">会话列表</a>
+    <a class="btn btn-ghost" href="/logout/" style="display:block; margin-top:10px; text-align:center;">退出登录</a>
+
+    <div class="hint">
+      <div class="hint-title">当前会话</div>
+      <div class="hint-body mono">#{{ conv.id }} · {{ conv.title }}</div>
+    </div>
+
+    <div class="meta">
+      <div>Model: <span class="mono">{{ lm_model }}</span></div>
+      <div>Summary: <span class="mono">{% if summary_enabled %}on{% else %}off{% endif %}</span></div>
+    </div>
+
+    <div class="hint">
+      <div class="hint-title">快捷键</div>
+      <div class="hint-body">Enter 发送；Shift+Enter 换行。输入框会自动增高。</div>
+    </div>
+    <div class="hint">
+      <div class="hint-title">提示</div>
+      <div class="hint-body">为确保隐私信息不被他人获取，结束使用请及时退出登录</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="header">
+      <div class="h-title">对话</div>
+      <div class="h-sub">Noir UI</div>
+
+      <!-- Tabs -->
+      <div style="margin-top:12px; display:flex; gap:10px;">
+        <button class="mini" type="button" id="tabAI">AI 对话</button>
+        <button class="mini" type="button" id="tabCounselor">
+          老师消息 <span class="mono" id="counselorCount">(0)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- AI Panel -->
+    <div class="chat" id="chatAI">
+      {% for m in history %}
+        {% if m.role != 'counselor' %}
+        <div class="msg {% if m.role == 'user' %}user{% else %}assistant{% endif %}">
+          <div class="bubble">
+            <div class="role">{% if m.role == 'user' %}You{% else %}Assistant{% endif %}</div>
+            <div class="content" data-raw="{{ m.content|escape }}"></div>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <!-- Counselor Panel -->
+    <div class="chat" id="chatCounselor" style="display:none;">
+      {% for m in history %}
+        {% if m.role == 'counselor' %}
+        <div class="msg assistant">
+          <div class="bubble">
+            <div class="role">
+              老师消息 · 来自：<span class="mono">{{ m.sender|default:"(unknown)" }}</span>
+            </div>
+            <div class="content" data-raw="{{ m.content|escape }}"></div>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="composer">
+      <textarea id="input" rows="5" maxlength="1000" placeholder="输入内容，Enter 发送 · Shift+Enter 换行"></textarea>
+      <button class="send-btn" id="sendBtn" title="发送">➤</button>
+    </div>
+
+    <div class="footer">
+      <span class="mono">/api/chat/stream/</span>
+      <span class="sep">·</span>
+      <span class="mono">cid={{ conv.id }}</span>
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function scrollBottom(el){
+    if(!el) return;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function esc(s){
+    return (s||"")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  function parseCodeFences(text){
+    const out = [];
+    const re = /```([a-zA-Z0-9_+\-]*)\n([\s\S]*?)```/g;
+    let last = 0;
+    let m;
+    while((m = re.exec(text)) !== null){
+      out.push({type:"text", value:text.slice(last, m.index)});
+      out.push({type:"code", lang:(m[1]||"").trim(), value:m[2]});
+      last = re.lastIndex;
+    }
+    out.push({type:"text", value:text.slice(last)});
+    return out;
+  }
+
+  function renderInline(text){
+    let t = esc(text);
+    t = t.replace(/`([^`]+?)`/g, (m,p1)=>`<code class="inline-code">${esc(p1)}</code>`);
+    t = t.replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/\*([^*]+?)\*/g, "<em>$1</em>");
+    t = t.replace(/\n/g, "<br/>");
+    return t;
+  }
+
+  function isTableBlock(lines){
+    if(lines.length < 2) return false;
+    const hasPipe = (s) => s.includes("|");
+    if(!hasPipe(lines[0]) || !hasPipe(lines[1])) return false;
+    const sep = lines[1].trim();
+    if(!/^\|?(\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$/.test(sep)) return false;
+    return true;
+  }
+
+  function splitRow(line){
+    let s = line.trim();
+    if(s.startsWith("|")) s = s.slice(1);
+    if(s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map(x => x.trim());
+  }
+
+  function renderTable(lines){
+    const header = splitRow(lines[0]).map(esc);
+    const bodyLines = lines.slice(2);
+    const rows = bodyLines
+      .filter(l => l.trim().length)
+      .map(l => splitRow(l).map(esc));
+
+    const thead = `<thead><tr>${header.map(h=>`<th>${h}</th>`).join("")}</tr></thead>`;
+    const tbody = `<tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>`;
+    return `<div class="table-wrap"><table class="md-table">${thead}${tbody}</table></div>`;
+  }
+
+  function renderMarkdown(text){
+    text = (text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const blocks = parseCodeFences(text);
+    let html = "";
+
+    for(const b of blocks){
+      if(b.type === "code"){
+        const code = esc(b.value).replaceAll("\n","<br/>");
+        const lang = esc(b.lang || "");
+        html += `
+          <div class="code-wrap">
+            <div class="code-head">
+              <div class="code-lang">${lang || "&nbsp;"}</div>
+              <button class="code-copy" type="button">Copy</button>
+            </div>
+            <pre class="code"><code>${code}</code></pre>
+          </div>
+        `;
+        continue;
+      }
+
+      const chunk = b.value || "";
+      const lines = chunk.split("\n");
+      let i = 0;
+      while(i < lines.length){
+        if(lines[i].trim()===""){
+          html += "<br/>";
+          i++;
+          continue;
+        }
+
+        const remain = lines.slice(i);
+        if(isTableBlock(remain.slice(0, Math.min(remain.length, 50)))){
+          const tbl = [lines[i], lines[i+1]];
+          let j = i + 2;
+          while(j < lines.length && lines[j].includes("|") && lines[j].trim().length){
+            tbl.push(lines[j]);
+            j++;
+          }
+          html += renderTable(tbl);
+          i = j;
+          continue;
+        }
+
+        const line = lines[i];
+
+        if(/^>\s+/.test(line)){
+          let q = [];
+          let j = i;
+          while(j < lines.length && /^>\s+/.test(lines[j])){
+            q.push(lines[j].replace(/^>\s+/, ""));
+            j++;
+          }
+          html += `<blockquote class="md-quote">${renderInline(q.join("\n"))}</blockquote>`;
+          i = j;
+          continue;
+        }
+
+        if(/^-\s+/.test(line)){
+          let items = [];
+          let j = i;
+          while(j < lines.length && /^-\s+/.test(lines[j])){
+            items.push(lines[j].replace(/^-+\s+/, ""));
+            j++;
+          }
+          html += `<ul class="md-ul">${items.map(x=>`<li>${renderInline(x)}</li>`).join("")}</ul>`;
+          i = j;
+          continue;
+        }
+
+        html += `<div class="md-p">${renderInline(line)}</div>`;
+        i++;
+      }
+    }
+
+    return html;
+  }
+
+  function bindCopyButtons(scope){
+    const root = scope || document;
+    root.querySelectorAll(".code-wrap .code-copy").forEach(btn => {
+      if(btn.dataset.bound === "1") return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", async () => {
+        const pre = btn.closest(".code-wrap").querySelector("pre code");
+        const raw = pre.innerText || "";
+        try{
+          await navigator.clipboard.writeText(raw);
+          const old = btn.textContent;
+          btn.textContent = "Copied";
+          setTimeout(()=>btn.textContent=old, 900);
+        }catch(e){
+          const old = btn.textContent;
+          btn.textContent = "Failed";
+          setTimeout(()=>btn.textContent=old, 900);
+        }
+      });
+    });
+  }
+
+  function addMessageTo(chatEl, role, text){
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + (role === "user" ? "user" : "assistant");
+
+    wrap.innerHTML = `
+      <div class="bubble">
+        <div class="role">${role === "user" ? "You" : "Assistant"}</div>
+        <div class="content" data-raw=""></div>
+      </div>
+    `;
+
+    chatEl.appendChild(wrap);
+
+    const contentEl = wrap.querySelector(".content");
+    const raw = (text || "");
+    contentEl.setAttribute("data-raw", raw);
+    contentEl.innerHTML = renderMarkdown(raw);
+    bindCopyButtons(contentEl);
+
+    scrollBottom(chatEl);
+    return wrap;
+  }
+
+  async function postJSON(url, body){
+    const r = await fetch(url, {
+      method:"POST",
+      headers: {"Content-Type":"application/json", "X-CSRFToken": csrftoken || ""},
+      body: JSON.stringify(body||{})
+    });
+    return await r.json();
+  }
+
+  // Tabs
+  const tabAI = document.getElementById("tabAI");
+  const tabCounselor = document.getElementById("tabCounselor");
+  const chatAI = document.getElementById("chatAI");
+  const chatCounselor = document.getElementById("chatCounselor");
+
+  function showTab(which){
+    if(which === "counselor"){
+      chatAI.style.display = "none";
+      chatCounselor.style.display = "block";
+      scrollBottom(chatCounselor);
+    }else{
+      chatCounselor.style.display = "none";
+      chatAI.style.display = "block";
+      scrollBottom(chatAI);
+    }
+  }
+
+  tabAI.addEventListener("click", ()=>showTab("ai"));
+  tabCounselor.addEventListener("click", ()=>showTab("counselor"));
+  showTab("ai"); // 默认 AI 对话
+
+  const input = document.getElementById("input");
+  function autoGrow(){
+    input.style.height = "auto";
+    const cap = 260;
+    input.style.height = Math.min(input.scrollHeight, cap) + "px";
+  }
+  input.addEventListener("input", autoGrow);
+  autoGrow();
+
+  async function send(){
+    const text = (input.value || "").trim();
+    if(!text) return;
+
+    input.value = "";
+    autoGrow();
+
+    // 用户发送始终进入 AI 面板（老师面板不允许用户发）
+    showTab("ai");
+
+    addMessageTo(chatAI, "user", text);
+    const placeholder = addMessageTo(chatAI, "assistant", "…");
+    const c = placeholder.querySelector(".content");
+    if(!c) return;
+
+    let fullText = "";
+
+    try{
+      const resp = await fetch("/api/chat/stream/", {
+        method: "POST",
+        headers: {"Content-Type":"application/json", "X-CSRFToken": csrftoken || ""},
+        body: JSON.stringify({ text, cid: {{ conv.id }} })
+      });
+
+      if(!resp.ok || !resp.body){
+        c.innerHTML = renderMarkdown("ERROR");
+        bindCopyButtons(c);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while(true){
+        const { value, done } = await reader.read();
+        if(done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop();
+
+        for(const part of parts){
+          const line = (part || "").trim();
+          if(!line.startsWith("data:")) continue;
+
+          const payload = line.slice(5).trim();
+          if(!payload) continue;
+
+          let evt = null;
+          try{
+            evt = JSON.parse(payload);
+          }catch(e){
+            fullText += payload;
+            c.innerHTML = renderMarkdown(fullText);
+            c.setAttribute("data-raw", fullText);
+            bindCopyButtons(c);
+            scrollBottom(chatAI);
+            continue;
+          }
+
+          if(!evt || !evt.t) continue;
+
+          if(evt.t === "d"){
+            fullText += (evt.c || "");
+            c.innerHTML = renderMarkdown(fullText);
+            c.setAttribute("data-raw", fullText);
+            bindCopyButtons(c);
+            scrollBottom(chatAI);
+          }else if(evt.t === "r"){
+            fullText = (evt.c || "");
+            c.innerHTML = renderMarkdown(fullText);
+            c.setAttribute("data-raw", fullText);
+            bindCopyButtons(c);
+            scrollBottom(chatAI);
+          }else if(evt.t === "done"){
+            break;
+          }
+        }
+      }
+
+    }catch(e){
+      c.innerHTML = renderMarkdown("ERROR: " + (e && e.message ? e.message : String(e)));
+      bindCopyButtons(c);
+    }
+
+    scrollBottom(chatAI);
+  }
+
+  document.getElementById("sendBtn").addEventListener("click", send);
+  input.addEventListener("keydown", (e) => {
+    if(e.key === "Enter" && !e.shiftKey){
+      e.preventDefault();
+      send();
+    }
+  });
+
+  document.getElementById("newBtn").addEventListener("click", async () => {
+    const data = await postJSON("/api/new/", {});
+    if(data && data.ok && data.id){
+      location.href = "/c/" + data.id + "/";
+    }
+  });
+
+  document.querySelectorAll('.content[data-raw]').forEach(el=>{
+    const raw = el.getAttribute("data-raw") || "";
+    el.innerHTML = renderMarkdown(raw);
+    bindCopyButtons(el);
+  });
+
+  scrollBottom(chatAI);
+    function updateCounselorCount(){
+    const n = document.querySelectorAll("#chatCounselor .msg").length;
+    const el = document.getElementById("counselorCount");
+    if(el) el.textContent = `(${n})`;
+  }
+
+  updateCounselorCount();
+  let lastCounselorCount = document.querySelectorAll("#chatCounselor .msg").length;
+
+  async function pollCounselor(){
+    try{
+      const r = await fetch(`/api/counselor/{{ conv.id }}/`);
+      if(!r.ok) return;
+      const data = await r.json();
+      if(!data.msgs) return;
+
+      if(data.msgs.length > lastCounselorCount){
+        chatCounselor.innerHTML = "";
+        for(const m of data.msgs){
+          const wrap = document.createElement("div");
+          wrap.className = "msg assistant";
+          wrap.innerHTML = `
+            <div class="bubble">
+                <div class="role">老师消息 · 来自：<span class="mono">${m.sender||"(unknown)"}</span></div>
+                <div class="content">${renderMarkdown(m.content)}</div>
+            </div>
+           `;
+          chatCounselor.appendChild(wrap);
+        }
+        lastCounselorCount = data.msgs.length;
+        updateCounselorCount();
+      }
+    }catch(e){}
+  }
+  setInterval(pollCounselor, 5000);
+
+</script>
+{% endblock %}
