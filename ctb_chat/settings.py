@@ -87,7 +87,7 @@ LM_PROVIDER = os.getenv("LM_PROVIDER", "deepseek")
 
 # DeepSeek (OpenAI-compatible) defaults
 LM_BASE_URL = os.getenv("LM_BASE_URL", "https://api.deepseek.com/v1")
-LM_API_KEY = os.getenv("LM_API_KEY", os.getenv("DEEPSEEK_API_KEY", "sk-2e86fa08baf7430aa0e695a4a359c551"))
+LM_API_KEY = os.getenv("LM_API_KEY", os.getenv("DEEPSEEK_API_KEY", "sk-"))
 
 # Default model: DeepSeek Chat (override via env LM_MODEL)
 LM_MODEL = os.getenv("LM_MODEL", "deepseek-chat")
